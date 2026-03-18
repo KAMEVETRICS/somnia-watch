@@ -22,7 +22,7 @@ export default function SearchAddress() {
     setResult(null);
 
     try {
-      const res = await fetch(`${API_URL}/api/address/${addr}`);
+      const res = await fetch(`${API_URL}/address/${addr}`);
       if (!res.ok) throw new Error("Fetch failed");
       const data: AddressInfo = await res.json();
       setResult(data);
