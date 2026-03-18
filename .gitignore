@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+backend/node_modules/
+frontend/node_modules/
+
+# Environment Variables
+.env
+.env.local
+.env.development
+.env.production
+backend/.env
+frontend/.env.local
+
+# Next.js Build Output
+frontend/.next/
+frontend/out/
+
+# TypeScript Build Output
+backend/dist/
+frontend/dist/
+
+# Hardhat & Smart Contracts
+artifacts/
+cache/
+typechain/
+typechain-types/
+coverage/
+coverage.json
+
+# IDE / OS Files
+.DS_Store
+.vscode/
+.idea/
+*.log

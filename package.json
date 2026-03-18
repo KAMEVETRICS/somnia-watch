@@ -1,0 +1,26 @@
+{
+  "name": "somnia",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "compile": "hardhat compile",
+    "deploy": "hardhat run scripts/deploy.js --network somniaTestnet",
+    "subscribe": "node scripts/subscribe.mjs",
+    "test": "hardhat test"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^6.1.2",
+    "hardhat": "^2.28.6"
+  },
+  "dependencies": {
+    "@somnia-chain/reactivity": "^0.1.10",
+    "@somnia-chain/reactivity-contracts": "^0.1.6",
+    "dotenv": "^17.3.1",
+    "viem": "^2.37.13"
+  }
+}
