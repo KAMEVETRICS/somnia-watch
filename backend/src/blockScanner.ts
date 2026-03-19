@@ -54,15 +54,7 @@ export function startBlockScanner(): void {
     }
   }, 2000);
 
-  // ─── Address watcher: poll tracked wallets for activity ────────
-  // This runs separately and checks if tracked wallets have new txs
-  setInterval(async () => {
-    try {
-      await checkTrackedWallets();
-    } catch (err) {
-      console.error("📱 Address watcher error:", (err as Error).message);
-    }
-  }, 5000); // Check every 5 seconds
+  // ─── Address watcher is now handled natively by ReactivityTracker ───
 }
 
 // ─── Sample a single block for firehose + hot contracts ──────────────

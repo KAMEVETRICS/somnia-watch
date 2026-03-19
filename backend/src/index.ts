@@ -9,6 +9,7 @@ import { startWhaleListener } from "./whaleListener.js";
 import { startBlockScanner } from "./blockScanner.js";
 import { startRestApi } from "./restApi.js";
 import { startCleanupInterval } from "./hotContracts.js";
+import { startReactivityTracker } from "./reactivityTracker.js";
 import { config } from "./config.js";
 
 async function main(): Promise<void> {
@@ -33,10 +34,13 @@ async function main(): Promise<void> {
   // 4. Start WhaleAlert event listener (Somnia Reactivity push events)
   startWhaleListener();
 
-  // 5. Start block scanner (wallet tracking + hot contracts + firehose)
+  // 5. Start block scanner (hot contracts + firehose)
   startBlockScanner();
 
-  // 6. Start periodic cleanup of stale hot contracts data
+  // 6. Start off-chain Reactivity WebSocket listener (wallet tracking)
+  startReactivityTracker();
+
+  // 7. Start periodic cleanup of stale hot contracts data
   startCleanupInterval();
 
   console.log("\n🚀 All systems operational!\n");
