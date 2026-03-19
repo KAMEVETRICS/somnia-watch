@@ -1,5 +1,5 @@
 import { SDK } from "@somnia-chain/reactivity";
-import { createPublicClient, http } from "viem";
+import { createPublicClient, webSocket } from "viem";
 import { ethers } from "ethers";
 import { config as envConfig } from "./config.js";
 import { getTrackedWallets, notifyTrackedUser } from "./telegramBot.js";
@@ -18,7 +18,7 @@ export async function startReactivityTracker(): Promise<void> {
 
   try {
     const publicClient = createPublicClient({ 
-      transport: http(envConfig.somniaRpcUrl) 
+      transport: webSocket(envConfig.somniaWssUrl) 
     });
 
     sdk = new SDK({ public: publicClient });
