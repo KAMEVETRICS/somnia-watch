@@ -28,8 +28,18 @@ export const config = {
 } as const;
 
 // ─── WhaleTracker ABI (only the event we need) ───────────────────────
+// MUST be JSON ABI format for viem's watchContractEvent (not ethers string format)
 export const WHALE_TRACKER_ABI = [
-  "event WhaleAlert(address indexed token, address indexed from, address indexed to, uint256 amount)",
+  {
+    type: "event",
+    name: "WhaleAlert",
+    inputs: [
+      { name: "token", type: "address", indexed: true },
+      { name: "from", type: "address", indexed: true },
+      { name: "to", type: "address", indexed: true },
+      { name: "amount", type: "uint256", indexed: false },
+    ],
+  },
 ] as const;
 
 // ─── Token metadata ──────────────────────────────────────────────────
