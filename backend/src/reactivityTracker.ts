@@ -1,6 +1,6 @@
 import { SDK } from "@somnia-chain/reactivity";
 import { createPublicClient, webSocket, pad } from "viem";
-import { config as envConfig } from "./config.js";
+import { config as envConfig, TOKEN_MAP } from "./config.js";
 import { getTrackedWallets, notifyTrackedUser } from "./telegramBot.js";
 
 let sdk: SDK;
@@ -32,7 +32,7 @@ export async function startReactivityTracker(): Promise<void> {
     sdk = new SDK({ public: publicClient });
 
     // Use eventContractSources to bypass RPC node generic wildcard DDoS block!
-    const majorTokens = Object.keys(envConfig.TOKEN_MAP);
+    const majorTokens = Object.keys(TOKEN_MAP);
     
     // Create a targeted subscription to perfectly demonstrate Reactivity SDK Push model
     await sdk.subscribe({
