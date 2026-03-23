@@ -1,69 +1,91 @@
-import { SDK } from "@somnia-chain/reactivity";
-import { createPublicClient, http } from "viem";
-import { ethers } from "ethers";
+import { createPublicClient, http, formatEther } from "viem";
 import { config as envConfig } from "./config.js";
 import { getTrackedWallets, notifyTrackedUser } from "./telegramBot.js";
 
-let sdk: SDK;
+let publicClient: any = null;
+
+const nonceCache = new Map<string, number>();
+const balanceCache = new Map<string, bigint>();
 
 /**
- * Powered by Somnia Reactivity SDK!
- * This replaces the standard Web2 "polling" approach for checking wallet balances.
- * Instead, this creates an off-chain WebSocket subscription that pushes ALL
- * smart contract events from the entire Somnia Testnet directly to us.
- * We parse the topics of every event to see if our tracked wallets are involved.
+ * Powered completely by Viem Native endpoints!
+ * This surgically checks ONLY exactly what the users want to track via
+ * nonce and balance polling. Because we don't scan 1M TPS blocks,
+ * this saves massive amounts of Node.js event-loop memory.
  */
-export async function startReactivityTracker(): Promise<void> {
-  console.log("🌊 Starting Off-Chain Reactivity Wallet Tracker...");
+export function startReactivityTracker(): void {
+  console.log("⚡ Starting Viem-Powered Native Wallet Tracker...");
 
-  try {
-    const publicClient = createPublicClient({ 
-      transport: http(envConfig.somniaRpcUrl) 
-    });
+  publicClient = createPublicClient({ 
+    transport: http(envConfig.somniaRpcUrl) 
+  });
 
-    sdk = new SDK({ public: publicClient });
+  // Since RPC polling is cheap, we poll exactly the tracked wallets every 3s
+  setInterval(async () => {
+    try {
+      const trackedWallets = getTrackedWallets();
+      if (trackedWallets.size === 0) return;
 
-    // Create a wildcard subscription to perfectly demonstrate Reactivity Push model
-    await sdk.subscribe({
-      ethCalls: [],
-      onData: async (payload: any) => {
-        const result = payload?.result;
-        if (!result || !result.topics) return;
-        
-        const topics: string[] = result.topics;
-        const trackedWallets = getTrackedWallets();
-        if (trackedWallets.size === 0) return;
+      const addressToChatIds = new Map<string, number[]>();
+      for (const [chatId, addresses] of trackedWallets) {
+        for (const addr of addresses) {
+          const existing = addressToChatIds.get(addr) || [];
+          existing.push(chatId);
+          addressToChatIds.set(addr, existing);
+        }
+      }
 
-        // Check if any topic matches our tracked addresses
-        // Event topics pad addresses to 32 bytes (64 hex characters)
-        for (const [chatId, addresses] of trackedWallets) {
-          for (const addr of addresses) {
-            // Pad address to 32 bytes (0x + 64 chars = 66 chars)
-            const paddedAddr = ethers.zeroPadValue(addr, 32).toLowerCase();
-            
-            for (const topic of topics) {
-              if (topic && topic.toLowerCase() === paddedAddr) {
-                // Address was found in an event topic! (Usually sender or receiver)
-                console.log(`⚡ Reactivity caught event for tracked wallet: ${addr}`);
+      for (const [address, chatIds] of addressToChatIds) {
+        try {
+          const [nonce, balance] = await Promise.all([
+            publicClient.getTransactionCount({ address: address as `0x${string}` }),
+            publicClient.getBalance({ address: address as `0x${string}` }),
+          ]);
+
+          const prevNonce = nonceCache.get(address);
+          const prevBalance = balanceCache.get(address);
+
+          nonceCache.set(address, nonce);
+          balanceCache.set(address, balance);
+
+          if (prevNonce === undefined || prevBalance === undefined) continue;
+
+          // Nonce increased = Address SENT a transaction
+          if (nonce > prevNonce) {
+            console.log(`⚡ Viem Tracker: Wallet ${address} sent tx (nonce ${prevNonce} → ${nonce})`);
+            for (const chatId of chatIds) {
+              await notifyTrackedUser(
+                chatId,
+                address,
+                "sender",
+                "check explorer for details",
+                `Nonce increased: ${nonce}`
+              );
+            }
+          }
+
+          // Balance changed = Received/Transferred STT directly
+          if (balance !== prevBalance) {
+            const diff = balance - prevBalance;
+            if (diff > 0n) {
+              console.log(`⚡ Viem Tracker: Wallet ${address} received ${formatEther(diff)} STT`);
+              for (const chatId of chatIds) {
                 await notifyTrackedUser(
                   chatId,
-                  addr,
-                  "receiver", // Generically logging as interaction
-                  "Check explorer for latest contract interaction!",
-                  "Reactivity Event Push ⚡"
+                  address,
+                  "receiver",
+                  "check explorer for details",
+                  `${formatEther(diff)} STT natively!`
                 );
               }
             }
           }
+        } catch (err) {
+          // Ignored
         }
-      },
-      onError: (err: Error) => {
-        console.error("❌ Reactivity Subscription Error:", err.message);
       }
-    });
-
-    console.log("✅ Reactivity Wallet Tracker active! Listening to all events.");
-  } catch (err) {
-    console.error("❌ Failed to start Reactivity tracker:", err);
-  }
+    } catch (err) {
+      console.error("Viem Tracker Error:", err);
+    }
+  }, 3000);
 }

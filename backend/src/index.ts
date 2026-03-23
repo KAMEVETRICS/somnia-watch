@@ -6,7 +6,7 @@
 import { startWsServer } from "./wsServer.js";
 import { startTelegramBot } from "./telegramBot.js";
 import { startWhaleListener } from "./whaleListener.js";
-import { startBlockScanner } from "./blockScanner.js";
+import { startNetworkStatsPoller } from "./networkStats.js";
 import { startRestApi } from "./restApi.js";
 import { startCleanupInterval } from "./hotContracts.js";
 import { startReactivityTracker } from "./reactivityTracker.js";
@@ -34,8 +34,8 @@ async function main(): Promise<void> {
   // 4. Start WhaleAlert event listener (Somnia Reactivity push events)
   startWhaleListener();
 
-  // 5. Start block scanner (hot contracts + firehose)
-  startBlockScanner();
+  // 5. Start lightweight Viem poller for dashboard stats (no tx scanning)
+  startNetworkStatsPoller();
 
   // 6. Start off-chain Reactivity WebSocket listener (wallet tracking)
   startReactivityTracker();

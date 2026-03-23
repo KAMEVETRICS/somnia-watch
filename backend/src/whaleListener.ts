@@ -1,87 +1,111 @@
-import { ethers } from "ethers";
+import { createPublicClient, webSocket } from "viem";
 import { config, WHALE_TRACKER_ABI } from "./config.js";
 import { generateWhaleTag } from "./aiTagger.js";
 import { broadcastWhaleAlert } from "./telegramBot.js";
 import { broadcast } from "./wsServer.js";
 import { formatAmount, getTokenMeta, shortenAddress, nowISO } from "./utils.js";
+import { recordContractInteraction } from "./hotContracts.js";
 
-// ─── WhaleAlert Event Listener ───────────────────────────────────────
-// Connects via WebSocket to Somnia Testnet and listens for WhaleAlert
-// events emitted by the deployed WhaleTracker contract.
+// ─── WhaleAlert Event Listener (Viem Native Push) ────────────────────
+// Connects via WebSocket to Somnia Testnet and natively watches for
+// WhaleAlert events using pure push infrastructure (no polling).
 
-let wsProvider: ethers.WebSocketProvider | null = null;
+let publicClient: any = null;
 
 export function startWhaleListener(): void {
   connect();
 }
 
 function connect(): void {
-  console.log("🐋 Connecting to Somnia WebSocket for WhaleAlert events...");
+  console.log("🐋 Connecting to Somnia WebSocket for WhaleAlert events using Viem...");
 
-  wsProvider = new ethers.WebSocketProvider(config.somniaWssUrl);
-  const contract = new ethers.Contract(config.whaleTrackerAddress, WHALE_TRACKER_ABI, wsProvider);
+  publicClient = createPublicClient({
+    transport: webSocket(config.somniaWssUrl, {
+      keepAlive: true,
+      reconnect: true
+    })
+  });
 
-  // Listen for WhaleAlert events
-  contract.on("WhaleAlert", async (token: string, from: string, to: string, amount: bigint, event: ethers.EventLog) => {
-    console.log(`\n🐋 WhaleAlert detected!`);
+  // Verify connection by getting chain ID
+  publicClient.getChainId().then((chainId: number) => {
+    console.log(`✅ Connected to Somnia WSS (chainId: ${chainId})`);
+    console.log(`   Listening natively for WhaleAlert on ${shortenAddress(config.whaleTrackerAddress)}`);
+    
+    // Setup Native Push Subscription
+    publicClient.watchContractEvent({
+      address: config.whaleTrackerAddress as `0x${string}`,
+      abi: WHALE_TRACKER_ABI,
+      eventName: "WhaleAlert",
+      onLogs: async (logs: any) => {
+        for (const log of logs) {
+          try {
+            const { args, transactionHash, blockNumber } = log;
+            const token = args.token;
+            const from = args.from;
+            const to = args.to;
+            const amount = args.amount;
 
-    // Get token metadata
-    const meta = getTokenMeta(token);
-    if (!meta) {
-      console.warn(`  Unknown token: ${token}`);
-      return;
-    }
+            console.log(`\n🐋 WhaleAlert detected!`);
 
-    // Format the amount
-    const formatted = formatAmount(amount, meta.decimals);
-    console.log(`  ${formatted} ${meta.symbol} | ${shortenAddress(from)} → ${shortenAddress(to)}`);
+            // Record this interaction for the Hot Contracts feature!
+            recordContractInteraction(token);
+            recordContractInteraction(config.whaleTrackerAddress);
 
-    // Generate AI behavioral tag
-    const aiTag = await generateWhaleTag(meta.symbol, from, to, formatted);
-    console.log(`  AI Tag: [${aiTag}]`);
+            // Get token metadata
+            const meta = getTokenMeta(token);
+            if (!meta) {
+              console.warn(`  Unknown token: ${token}`);
+              continue;
+            }
 
-    // Build the whale alert data object
-    const whaleData = {
-      token: token,
-      tokenSymbol: meta.symbol,
-      tokenName: meta.name,
-      category: meta.category,
-      from,
-      to,
-      amount: amount.toString(),
-      formattedAmount: formatted,
-      aiTag,
-      txHash: event.transactionHash,
-      blockNumber: event.blockNumber,
-      timestamp: nowISO(),
-    };
+            // Format the amount
+            const formatted = formatAmount(amount, meta.decimals);
+            console.log(`  ${formatted} ${meta.symbol} | ${shortenAddress(from)} → ${shortenAddress(to)}`);
 
-    // 1. Broadcast to Telegram channel
-    await broadcastWhaleAlert(meta, from, to, formatted, aiTag, event.transactionHash);
+            // Generate AI behavioral tag
+            const aiTag = await generateWhaleTag(meta.symbol, from, to, formatted);
+            console.log(`  AI Tag: [${aiTag}]`);
 
-    // 2. Push to frontend via WebSocket
-    broadcast({
-      type: "whale_alert",
-      data: whaleData,
-      timestamp: Date.now(),
+            // Build the whale alert data object
+            const whaleData = {
+              token: token,
+              tokenSymbol: meta.symbol,
+              tokenName: meta.name,
+              category: meta.category,
+              from,
+              to,
+              amount: amount.toString(),
+              formattedAmount: formatted,
+              aiTag,
+              txHash: transactionHash,
+              blockNumber: Number(blockNumber),
+              timestamp: nowISO(),
+            };
+
+            // 1. Broadcast to Telegram channel
+            await broadcastWhaleAlert(meta, from, to, formatted, aiTag, transactionHash);
+
+            // 2. Push to frontend via WebSocket
+            broadcast({
+              type: "whale_alert",
+              data: whaleData,
+              timestamp: Date.now(),
+            });
+
+            console.log(`  ✅ Broadcasted to Telegram + Frontend`);
+          } catch (err) {
+            console.error("❌ Error parsing WhaleAlert log:", err);
+          }
+        }
+      },
+      onError: (error: Error) => {
+        console.error("❌ Viem watchContractEvent error:", error.message);
+      }
     });
 
-    console.log(`  ✅ Broadcasted to Telegram + Frontend`);
-  });
-
-  // Handle provider errors and reconnection
-  wsProvider.on("error", (err) => {
-    console.error("❌ WebSocket error:", (err as Error).message);
-    console.warn("⚠️  Reconnecting in 5s...");
-    setTimeout(connect, 5000);
-  });
-
-  // Confirm connection once provider resolves its network
-  wsProvider.getNetwork().then((network) => {
-    console.log(`✅ Connected to Somnia WebSocket (chainId: ${network.chainId})`);
-    console.log(`   Listening for WhaleAlert on ${shortenAddress(config.whaleTrackerAddress)}`);
-  }).catch(() => {
-    console.warn("⚠️  WebSocket connection failed — retrying in 5s...");
+  }).catch((err: Error) => {
+    console.warn("⚠️ WebSocket connection failed:", err.message);
+    console.warn("   Retrying in 5s...");
     setTimeout(connect, 5000);
   });
 }
