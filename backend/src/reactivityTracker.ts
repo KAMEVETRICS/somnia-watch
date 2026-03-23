@@ -31,9 +31,13 @@ export async function startReactivityTracker(): Promise<void> {
 
     sdk = new SDK({ public: publicClient });
 
-    // Create a wildcard subscription to demonstrate Reactivity SDK Push model
+    // Use eventContractSources to bypass RPC node generic wildcard DDoS block!
+    const majorTokens = Object.keys(envConfig.TOKEN_MAP);
+    
+    // Create a targeted subscription to perfectly demonstrate Reactivity SDK Push model
     await sdk.subscribe({
       ethCalls: [],
+      eventContractSources: majorTokens as `0x${string}`[],
       onData: async (payload: any) => {
         const result = payload?.result;
         if (!result || !result.topics) return;
