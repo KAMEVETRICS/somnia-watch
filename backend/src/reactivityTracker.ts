@@ -1,14 +1,15 @@
 import { SDK } from "@somnia-chain/reactivity";
-import { createPublicClient, createWalletClient, webSocket, http, pad, defineChain } from "viem";
+import { createPublicClient, createWalletClient, webSocket, http, pad, defineChain, formatUnits, getAddress } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { config as envConfig, TOKEN_MAP } from "./config.js";
+import { config as envConfig, TOKEN_MAP, TOKEN_MAP_LOWER } from "./config.js";
 import { getTrackedWallets, notifyTrackedUser } from "./telegramBot.js";
+import { broadcast } from "./wsServer.js";
+import { shortenAddress, nowISO, getTokenMeta, formatAmount } from "./utils.js";
+import { recordContractInteraction } from "./hotContracts.js";
 
 let sdk: SDK;
 
 // ─── FIX 1+2: Use defineChain with BOTH http AND webSocket arrays ────
-// Competitors (SOMI Sentinel, Defi-Pulse) proved the SDK internally
-// reads rpcUrls.default.webSocket to establish its own connection.
 const INFRA_WSS = "wss://api.infra.testnet.somnia.network/ws";
 
 const somniaTestnet = defineChain({
@@ -27,10 +28,17 @@ const somniaTestnet = defineChain({
   },
 });
 
+// ─── ERC-20 Transfer event signature ──────────────────────────────────
+// keccak256("Transfer(address,address,uint256)")
+const TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+
+// ─── Whale threshold in native token units (100 tokens) ───────────────
+const WHALE_THRESHOLD_USD_EQUIV = 100n;
+
 /**
  * Powered strictly by Somnia Reactivity SDK!
  * Fixes applied from competitor analysis:
- *  1. Uses the undocumented infra WSS endpoint that accepts subscriptions
+ *  1. Uses the undocumented infra WSS endpoint
  *  2. defineChain() with webSocket array in rpcUrls
  *  3. Passes both public + wallet clients to SDK constructor
  */
@@ -40,14 +48,12 @@ export async function startReactivityTracker(): Promise<void> {
   console.log(`   RPC: ${envConfig.somniaRpcUrl}`);
 
   try {
-    // FIX 1: Connect via the infra WSS endpoint
     const publicClient = createPublicClient({
       chain: somniaTestnet,
       transport: webSocket(INFRA_WSS),
     });
 
-    // FIX 3: Pass a wallet client (defi-stream-insight pattern)
-    // The SDK may use this internally for certain subscription types
+    // FIX 3: Pass a wallet client if PRIVATE_KEY is available
     const privateKey = process.env.PRIVATE_KEY as `0x${string}` | undefined;
     let sdkConfig: any = { public: publicClient };
 
@@ -66,7 +72,6 @@ export async function startReactivityTracker(): Promise<void> {
 
     sdk = new SDK(sdkConfig);
 
-    // FIX 2: Use eventContractSources to target specific contracts
     const majorTokens = Object.keys(TOKEN_MAP);
     console.log(`   📡 Subscribing to ${majorTokens.length} token contracts...`);
 
@@ -74,31 +79,109 @@ export async function startReactivityTracker(): Promise<void> {
       ethCalls: [],
       eventContractSources: majorTokens as `0x${string}`[],
       onData: async (payload: any) => {
-        console.log("📥 SDK Event received!", JSON.stringify(payload).slice(0, 200));
+        const raw = payload?.result || payload;
+        if (!raw || !raw.topics || raw.topics.length < 1) return;
+
+        const topics: string[] = raw.topics;
+        const topicHash = topics[0];
+        const contractAddr = (raw.address || "").toLowerCase();
+
+        // ─── Identify the token ───────────────────────────────────
+        const tokenMeta = TOKEN_MAP_LOWER[contractAddr];
         
-        const result = payload?.result || payload;
-        if (!result || !result.topics) return;
+        // Record interaction for Hot Contracts dashboard feature
+        if (contractAddr) {
+          recordContractInteraction(contractAddr);
+        }
 
-        const topics: string[] = result.topics;
-        const trackedWallets = getTrackedWallets();
-        if (trackedWallets.size === 0) return;
+        // ─── Decode ERC-20 Transfer events ────────────────────────
+        if (topicHash === TRANSFER_TOPIC && topics.length >= 3) {
+          const from = extractAddress(topics[1]);
+          const to = extractAddress(topics[2]);
+          const rawAmount = raw.data && raw.data !== "0x" ? BigInt(raw.data) : 0n;
+          const decimals = tokenMeta?.decimals ?? 18;
+          const symbol = tokenMeta?.symbol ?? "???";
+          const formatted = formatUnits(rawAmount, decimals);
+          const numericAmount = parseFloat(formatted);
 
-        // Check if any event topic matches our tracked addresses
-        for (const [chatId, addresses] of trackedWallets) {
-          for (const addr of addresses) {
-            // Event topics pad addresses to 32 bytes
-            const paddedAddr = pad(addr as `0x${string}`).toLowerCase();
+          console.log(`📥 Transfer: ${formatted} ${symbol} | ${shortenAddress(from)} → ${shortenAddress(to)}`);
 
-            for (const topic of topics) {
-              if (topic && topic.toLowerCase() === paddedAddr) {
-                console.log(`⚡ SDK caught event for tracked wallet: ${addr}`);
+          // ─── Bridge to Dashboard Whale Feed ─────────────────────
+          // Treat any transfer >= 100 units as a whale transfer for the dashboard
+          if (rawAmount >= WHALE_THRESHOLD_USD_EQUIV * BigInt(10 ** decimals)) {
+            console.log(`🐋 WHALE transfer detected: ${formatted} ${symbol}`);
+
+            const whaleData = {
+              token: contractAddr,
+              tokenSymbol: symbol,
+              tokenName: tokenMeta?.name ?? "Unknown",
+              category: tokenMeta?.category ?? "ecosystem",
+              from,
+              to,
+              amount: rawAmount.toString(),
+              formattedAmount: formatted,
+              aiTag: numericAmount >= 1000 ? "Mega Whale 🐋🐋" : "Whale Move 🐋",
+              txHash: raw.transactionHash || "",
+              blockNumber: raw.blockNumber ? Number(raw.blockNumber) : 0,
+              timestamp: nowISO(),
+            };
+
+            // Push to frontend dashboard via WebSocket
+            broadcast({
+              type: "whale_alert",
+              data: whaleData,
+              timestamp: Date.now(),
+            });
+          }
+
+          // ─── Notify tracked wallet owners via Telegram ──────────
+          const trackedWallets = getTrackedWallets();
+          for (const [chatId, addresses] of trackedWallets) {
+            for (const addr of addresses) {
+              const addrLower = addr.toLowerCase();
+              
+              if (from.toLowerCase() === addrLower) {
+                // User's wallet SENT tokens
+                await notifyTrackedUser(
+                  chatId,
+                  addr,
+                  "sender",
+                  raw.transactionHash || "Check explorer",
+                  `${formatted} ${symbol}`
+                );
+              }
+              
+              if (to.toLowerCase() === addrLower) {
+                // User's wallet RECEIVED tokens
                 await notifyTrackedUser(
                   chatId,
                   addr,
                   "receiver",
-                  "Check explorer for latest contract interaction!",
-                  "Reactivity SDK Push ⚡"
+                  raw.transactionHash || "Check explorer",
+                  `${formatted} ${symbol}`
                 );
+              }
+            }
+          }
+        } else {
+          // Non-Transfer events — still check if any tracked wallet appears in topics
+          const trackedWallets = getTrackedWallets();
+          if (trackedWallets.size === 0) return;
+
+          for (const [chatId, addresses] of trackedWallets) {
+            for (const addr of addresses) {
+              const paddedAddr = pad(addr as `0x${string}`).toLowerCase();
+              for (const topic of topics) {
+                if (topic && topic.toLowerCase() === paddedAddr) {
+                  const symbol = tokenMeta?.symbol ?? "contract";
+                  await notifyTrackedUser(
+                    chatId,
+                    addr,
+                    "receiver",
+                    raw.transactionHash || "Check explorer",
+                    `${symbol} interaction`
+                  );
+                }
               }
             }
           }
@@ -109,7 +192,6 @@ export async function startReactivityTracker(): Promise<void> {
       }
     });
 
-    // Log subscription result like SOMI Sentinel does
     if (result instanceof Error) {
       console.error("❌ SDK Subscription failed:", result.message);
     } else {
@@ -124,4 +206,11 @@ export async function startReactivityTracker(): Promise<void> {
     console.log("   Retrying in 5 seconds...");
     setTimeout(() => startReactivityTracker(), 5000);
   }
+}
+
+/** Extract a 20-byte address from a 32-byte padded topic */
+function extractAddress(topic: string): string {
+  if (!topic || topic.length < 42) return "0x" + "0".repeat(40);
+  // topic is 0x + 64 hex chars, address is last 40 chars
+  return getAddress("0x" + topic.slice(-40));
 }
