@@ -1,5 +1,5 @@
 import { SDK } from "@somnia-chain/reactivity";
-import { createPublicClient, http, pad } from "viem";
+import { createPublicClient, webSocket, pad } from "viem";
 import { config as envConfig } from "./config.js";
 import { getTrackedWallets, notifyTrackedUser } from "./telegramBot.js";
 
@@ -15,9 +15,18 @@ export async function startReactivityTracker(): Promise<void> {
   console.log("🌊 Starting Off-Chain Reactivity SDK Wallet Tracker...");
 
   try {
-    // The SDK requires an http() transport initialized publicly
+    // The SDK REQUIRES the chain object to define http endpoints inside rpcUrls,
+    // otherwise passing webSocket() as transport throws an internal UrlRequiredError
     const publicClient = createPublicClient({ 
-      transport: http(envConfig.somniaRpcUrl) 
+      chain: {
+        id: 50312,
+        name: "Somnia Testnet",
+        nativeCurrency: { name: "STT", symbol: "STT", decimals: 18 },
+        rpcUrls: {
+          default: { http: [envConfig.somniaRpcUrl] },
+        },
+      },
+      transport: webSocket(envConfig.somniaWssUrl) 
     });
 
     sdk = new SDK({ public: publicClient });
