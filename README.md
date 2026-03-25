@@ -1,9 +1,9 @@
-# WhaleTracker — Somnia Reactivity Dashboard
+# SOMNIAWATCH — Somnia Reactivity Dashboard
 
 > **Real-time whale transfer detection powered by Somnia's Reactivity SDK.**
 > Built for the [Somnia Reactivity Mini Hackathon](https://somnia.network).
 
-WhaleTracker is a full-stack application that uses Somnia's **push-model Reactivity** to detect large token transfers the instant they happen — with zero off-chain polling. When a whale moves, the Reactivity SDK pushes the event to our backend, which triggers AI-powered behavioral tagging, Telegram alerts, and a real-time analytics dashboard.
+SomniaWatch is a full-stack application that uses Somnia's **push-model Reactivity** to detect large token transfers the instant they happen — with zero off-chain polling. When a whale moves, the Reactivity SDK pushes the event to our backend, which triggers AI-powered behavioral tagging, Telegram alerts, and a real-time analytics dashboard.
 
 ---
 
@@ -11,7 +11,7 @@ WhaleTracker is a full-stack application that uses Somnia's **push-model Reactiv
 
 Traditional whale tracking relies on off-chain bots that poll the chain every few seconds, parse logs, and react. This is slow, fragile, and requires always-on infrastructure.
 
-WhaleTracker uses Somnia's push-model instead:
+SomniaWatch uses Somnia's push-model instead:
 
 ```
 Traditional (Pull)                    WhaleTracker (Push via Reactivity)
