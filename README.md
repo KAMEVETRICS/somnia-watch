@@ -3,7 +3,7 @@
 > **Real-time whale transfer detection powered by Somnia's Reactivity SDK.**
 > Built for the [Somnia Reactivity Mini Hackathon](https://somnia.network).
 
-SomniaWatch is a full-stack application that uses Somnia's **push-model Reactivity** to detect large token transfers the instant they happen — with zero off-chain polling. When a whale moves, the Reactivity SDK pushes the event to our backend, which triggers AI-powered behavioral tagging, Telegram alerts, and a real-time analytics dashboard.
+SomniaWatch is a full-stack application that uses Somnia's **push-model Reactivity** to detect large token transfers the instant they happen with zero off-chain polling. When a whale moves, the Reactivity SDK pushes the event to our backend, which triggers AI-powered behavioral tagging, Telegram alerts, and a real-time analytics dashboard.
 
 ---
 
